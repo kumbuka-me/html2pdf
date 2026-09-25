@@ -1,6 +1,70 @@
 {
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended"
+  "extends": ["config:recommended"],
+  "labels": ["dependency"],
+  "postUpdateOptions": ["gomodTidy"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)Makefile$/"],
+      "matchStrings": [
+        "#\\srenovate:\\sdatasource=(?<datasource>.*?) depName=(?<depName>.*?)( versioning=(?<versioning>.*?))?( extractVersion=(?<extractVersion>.*?))?\\s.*?_VERSION(\\s+?\\?=\\s)(?<currentValue>.*)\\s"
+      ],
+      "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/(^|/)Dockerfile(\\.goreleaser)?$/"],
+      "matchStrings": [
+        "^#\\s*syntax=(?<depName>docker/dockerfile):(?<currentValue>\\S+)$"
+      ],
+      "datasourceTemplate": "docker",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^plugins\\.lock$/"],
+      "matchStrings": [
+        "(?<plugin>[a-z0-9-]+)=(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "kumbuka-plugin-{{{plugin}}}",
+      "packageNameTemplate": "kumbuka-me/plugins",
+      "datasourceTemplate": "github-releases",
+      "versioningTemplate": "semver",
+      "extractVersionTemplate": "^{{{plugin}}}/v(?<version>\\d+\\.\\d+\\.\\d+)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Update Kumbuka plugin lockfile",
+      "managerFilePatterns": ["/package\\.lock$/"],
+      "matchStrings": [
+        "(?<depName>[a-z0-9-]+)=(?<currentValue>\\d+\\.\\d+\\.\\d+(?:[-+][0-9A-Za-z.-]+)?)"
+      ],
+      "packageNameTemplate": "kumbuka-me/plugins",
+      "datasourceTemplate": "github-tags",
+      "versioningTemplate": "semver",
+      "extractVersionTemplate": "^{{{depName}}}/v(?<version>.*)$"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchPackageNames": ["/^(?:github\\.com\\/)?kumbuka-me\\//"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    },
+    {
+      "matchPackageNames": ["prettier", "golangci/golangci-lint"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    },
+    {
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["docker/dockerfile"],
+      "automerge": true
+    },
+    {
+      "matchManagers": ["custom.regex"],
+      "matchPackageNames": ["kumbuka-me/plugins"],
+      "groupName": "Kumbuka plugins"
+    }
   ]
 }
