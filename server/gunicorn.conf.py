@@ -7,6 +7,7 @@ class AccessLogger(Logger):
     """Suppress successful health-check access logs."""
 
     def access(self, resp, req, environ, request_time):
+        """Log every request except successful health checks."""
         status = str(resp.status).split(maxsplit=1)[0]
 
         if (

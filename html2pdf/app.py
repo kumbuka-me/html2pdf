@@ -63,13 +63,21 @@ INDEX_HEADERS: tuple[Header, ...] = (
 class Config:
     """Runtime configuration loaded from environment variables."""
 
+    # token authenticates render requests when non-empty.
     token: str
+    # version identifies the running service build on the usage page.
     version: str
+    # workers configures the Gunicorn worker count displayed to operators.
     workers: int
+    # timeout configures the Gunicorn request timeout in seconds.
     timeout: int
+    # max_html_bytes bounds the accepted UTF-8 request body size.
     max_html_bytes: int
+    # max_pdf_bytes bounds the generated PDF response size.
     max_pdf_bytes: int
+    # listen_address identifies the configured service bind address.
     listen_address: str = "0.0.0.0:8080"
+    # asset_policy controls whether rendered documents may fetch remote assets.
     asset_policy: AssetPolicy = AssetPolicy.EMBEDDED
 
     @classmethod
@@ -128,7 +136,13 @@ class AssetError(ValueError):
 class RequestError(ValueError):
     """An HTTP request failed validation."""
 
+    # status is the HTTP status returned for the invalid request.
+    status: HTTPStatus
+    # body is the safe response body describing the validation failure.
+    body: bytes
+
     def __init__(self, status: HTTPStatus, body: bytes) -> None:
+        """Initialize a client-safe validation failure response."""
         super().__init__(body.decode("utf-8", errors="replace").strip())
         self.status = status
         self.body = body
@@ -138,6 +152,7 @@ class RequestError(ValueError):
 class Request:
     """Small typed wrapper around the WSGI request environment."""
 
+    # _environ contains the server-provided WSGI request values.
     _environ: Environ
 
     def _string(self, key: str) -> str:
@@ -242,12 +257,14 @@ def render_document(source: str, asset_policy: AssetPolicy = AssetPolicy.EMBEDDE
         """Reject asset schemes that are not enabled by the configured policy."""
 
         def __init__(self) -> None:
+            """Initialize a fetcher that records policy violations."""
             # Redirects stay disabled so an allowed HTTP(S) URL cannot redirect
             # to a scheme outside the policy before it is validated here.
             super().__init__(allow_redirects=False)
             self.rejected = False
 
         def fetch(self, url: str, headers: Mapping[str, str] | None = None) -> Any:
+            """Fetch an allowed asset URL or reject it before network access."""
             scheme = urlsplit(url).scheme.casefold()
 
             if scheme not in asset_policy.allowed_schemes:
