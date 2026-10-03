@@ -1,6 +1,6 @@
 __pycache__/
 *.py[cod]
+.projectatlas/
 .DS_Store
 /bin/*
 !/bin/dev-tools.mk
-
