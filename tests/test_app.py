@@ -1,7 +1,13 @@
 import io
+import os
 from dataclasses import replace
 import unittest
 from unittest.mock import patch
+
+# The module WSGI entry point deliberately requires an explicit production
+# authentication choice. Unit tests exercise unauthenticated behavior through
+# this test-only opt-out.
+os.environ.setdefault("HTML2PDF__ALLOW_UNAUTHENTICATED", "true")
 
 import html2pdf.app as app
 from html2pdf.app import AssetError, AssetPolicy, render_document
@@ -216,8 +222,14 @@ class ServiceTests(unittest.TestCase):
                     svg,
                     {"Content-Type": "image/svg+xml"},
                 ),
-            ) as fetch:
-                result = render_document(f'<img src="{url}">', AssetPolicy.REMOTE)
+            ) as fetch, patch.object(
+                app.socket,
+                "getaddrinfo",
+                return_value=[(0, 0, 0, "", ("93.184.216.34", 443))],
+            ):
+                result = render_document(
+                    f'<img src="{url}">', AssetPolicy.REMOTE, frozenset(("example.com",)),
+                )
 
             self.assertTrue(result.startswith(b"%PDF-"))
             fetch.assert_called_once()
@@ -229,7 +241,7 @@ class ServiceTests(unittest.TestCase):
                 patch.object(app.URLFetcher, "fetch") as fetch,
                 self.assertRaises(AssetError),
             ):
-                render_document(f'<img src="{url}">', AssetPolicy.REMOTE)
+                render_document(f'<img src="{url}">', AssetPolicy.REMOTE, frozenset(("example.com",)))
 
             fetch.assert_not_called()
 
@@ -456,11 +468,13 @@ class ServiceTests(unittest.TestCase):
 
 class ConfigTests(unittest.TestCase):
     def test_listen_address_is_loaded_and_displayed(self):
-        default = app.Config.from_env({})
+        default = app.Config.from_env({"HTML2PDF__ALLOW_UNAUTHENTICATED": "true"})
         self.assertEqual(default.listen_address, "0.0.0.0:8080")
         self.assertIn(b"0.0.0.0:8080", app.load_index(default))
-        config = app.Config.from_env(
-            {"HTML2PDF__LISTEN_ADDRESS": " 0.0.0.0:9090 "})
+        config = app.Config.from_env({
+            "HTML2PDF__LISTEN_ADDRESS": " 0.0.0.0:9090 ",
+            "HTML2PDF__ALLOW_UNAUTHENTICATED": "true",
+        })
         self.assertEqual(config.listen_address, "0.0.0.0:9090")
         page = app.load_index(config)
         self.assertIn(b"HTML2PDF__LISTEN_ADDRESS", page)
@@ -470,7 +484,7 @@ class ConfigTests(unittest.TestCase):
         self.assertIn(b"&lt;address&gt;&quot;&amp;", escaped)
 
     def test_defaults_are_independent_of_host_environment(self):
-        config = app.Config.from_env({})
+        config = app.Config.from_env({"HTML2PDF__ALLOW_UNAUTHENTICATED": "true"})
         self.assertEqual(config, app.Config("", "dev", 2, 45,
                                             32 * 1024 * 1024, 64 * 1024 * 1024))
 
@@ -480,10 +494,12 @@ class ConfigTests(unittest.TestCase):
             "HTML2PDF__WORKERS": " 3 ", "HTML2PDF__TIMEOUT": "60",
             "HTML2PDF__MAX_HTML_BYTES": "100", "HTML2PDF__MAX_PDF_BYTES": "200",
             "HTML2PDF__ASSET_POLICY": " REMOTE ",
+            "HTML2PDF__REMOTE_ASSET_HOSTS": "assets.example.com",
         })
         self.assertEqual(
             config,
-            app.Config("secret", "v1", 3, 60, 100, 200, asset_policy=AssetPolicy.REMOTE),
+            app.Config("secret", "v1", 3, 60, 100, 200, asset_policy=AssetPolicy.REMOTE,
+                       remote_asset_hosts=frozenset(("assets.example.com",))),
         )
 
     def test_invalid_numeric_configuration_fails_startup(self):
@@ -491,7 +507,7 @@ class ConfigTests(unittest.TestCase):
             for value in ("0", "-1", "nope", "1.5"):
                 key = f"HTML2PDF__{name}"
                 with self.subTest(key=key, value=value), self.assertRaisesRegex(ValueError, key):
-                    app.Config.from_env({key: value})
+                    app.Config.from_env({"HTML2PDF__TOKEN": "secret", key: value})
 
     def test_blank_values_use_defaults(self):
         config = app.Config.from_env({
@@ -499,6 +515,7 @@ class ConfigTests(unittest.TestCase):
             "HTML2PDF__LISTEN_ADDRESS": "",
             "HTML2PDF__WORKERS": " ",
             "HTML2PDF__ASSET_POLICY": " ",
+            "HTML2PDF__ALLOW_UNAUTHENTICATED": "true",
         })
         self.assertEqual(config.version, "dev")
         self.assertEqual(config.listen_address, "0.0.0.0:8080")
@@ -511,7 +528,7 @@ class ConfigTests(unittest.TestCase):
                 ValueError,
                 "HTML2PDF__ASSET_POLICY must be one of: embedded, remote",
             ):
-                app.Config.from_env({"HTML2PDF__ASSET_POLICY": value})
+                app.Config.from_env({"HTML2PDF__TOKEN": "secret", "HTML2PDF__ASSET_POLICY": value})
 
     def test_index_escapes_configuration_and_never_displays_token(self):
         config = app.Config('hidden-secret', '<test>',
@@ -526,7 +543,7 @@ class ConfigTests(unittest.TestCase):
 
     def test_index_preserves_placeholder_text_in_configuration(self):
         config = replace(
-            app.Config.from_env({}),
+            app.Config.from_env({"HTML2PDF__ALLOW_UNAUTHENTICATED": "true"}),
             version="{{WORKERS}}<test>",
             listen_address="{{TIMEOUT}}&address",
         )

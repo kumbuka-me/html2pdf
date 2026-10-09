@@ -17,6 +17,14 @@ spec:
         - name: html2pdf
           image: ghcr.io/kumbuka-me/html2pdf:latest
           imagePullPolicy: IfNotPresent
+          env:
+            - name: HTML2PDF__TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: html2pdf-auth
+                  key: token
+            - name: HTML2PDF__ALLOW_UNAUTHENTICATED
+              value: "false"
           ports:
             - name: http
               containerPort: 8080
@@ -34,6 +42,18 @@ spec:
             periodSeconds: 30
             timeoutSeconds: 3
             failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
           volumeMounts:
             - name: tmp
               mountPath: /tmp

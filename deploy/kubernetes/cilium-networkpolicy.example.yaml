@@ -1,0 +1,40 @@
+---
+# Example for clusters using Cilium. Do not apply this together with the
+# standard networkpolicy.yaml: this policy replaces it and enables the exact
+# remote hostname below. Replace assets.example.com before applying.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: html2pdf
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: html2pdf
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app.kubernetes.io/name: kumbuka
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP
+  egress:
+    # Cilium observes permitted DNS answers and allows connections only to
+    # addresses returned for this exact FQDN on the specified port.
+    - toFQDNs:
+        - matchName: assets.example.com
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": kube-system
+            "k8s:k8s-app": kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: ANY
+          rules:
+            dns:
+              - matchName: assets.example.com

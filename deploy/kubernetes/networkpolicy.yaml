@@ -1,0 +1,31 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: html2pdf
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: html2pdf
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kumbuka
+  egress:
+    - to:
+        - namespaceSelector: {}
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Remote assets remain unavailable until operators add a narrowly scoped
+    # egress rule for each approved asset service/CIDR. This policy is the
+    # enforcement layer against DNS rebinding after the application's lookup.

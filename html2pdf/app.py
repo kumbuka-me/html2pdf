@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hmac
 import html
+import ipaddress
 import logging
 import os
 import re
+import socket
 import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
@@ -79,19 +81,36 @@ class Config:
     listen_address: str = "0.0.0.0:8080"
     # asset_policy controls whether rendered documents may fetch remote assets.
     asset_policy: AssetPolicy = AssetPolicy.EMBEDDED
+    # remote_asset_hosts is the exact host allowlist used in remote mode.
+    remote_asset_hosts: frozenset[str] = frozenset()
+    # allow_private_remote_assets permits approved hosts to resolve to non-public addresses.
+    allow_private_remote_assets: bool = False
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Config:
         """Load and validate runtime configuration."""
+        token = cls._env_str(env, "HTML2PDF__TOKEN")
+        allow_unauthenticated = cls._env_bool(env, "HTML2PDF__ALLOW_UNAUTHENTICATED", False)
+        if not token and not allow_unauthenticated:
+            raise ValueError("HTML2PDF__TOKEN is required unless HTML2PDF__ALLOW_UNAUTHENTICATED=true")
+
+        asset_policy = cls._env_asset_policy(env)
+        remote_asset_hosts = cls._env_remote_asset_hosts(env)
+        if asset_policy is AssetPolicy.REMOTE and not remote_asset_hosts:
+            raise ValueError("HTML2PDF__REMOTE_ASSET_HOSTS is required when HTML2PDF__ASSET_POLICY=remote")
+
         return cls(
-            token=cls._env_str(env, "HTML2PDF__TOKEN"),
+            token=token,
             version=cls._env_str(env, "HTML2PDF__VERSION", "dev"),
             listen_address=cls._env_str(env, "HTML2PDF__LISTEN_ADDRESS", "0.0.0.0:8080"),
             workers=cls._env_int(env, "HTML2PDF__WORKERS", 2),
             timeout=cls._env_int(env, "HTML2PDF__TIMEOUT", 45),
             max_html_bytes=cls._env_int(env, "HTML2PDF__MAX_HTML_BYTES", 32 * 1024 * 1024),
             max_pdf_bytes=cls._env_int(env, "HTML2PDF__MAX_PDF_BYTES", 64 * 1024 * 1024),
-            asset_policy=cls._env_asset_policy(env),
+            asset_policy=asset_policy,
+            remote_asset_hosts=remote_asset_hosts,
+            allow_private_remote_assets=cls._env_bool(
+                env, "HTML2PDF__ALLOW_PRIVATE_REMOTE_ASSETS", False),
         )
 
     @staticmethod
@@ -110,6 +129,29 @@ class Config:
         except ValueError:
             allowed = ", ".join(policy.value for policy in AssetPolicy)
             raise ValueError(f"{name} must be one of: {allowed}") from None
+
+    @classmethod
+    def _env_remote_asset_hosts(cls, env: Mapping[str, str]) -> frozenset[str]:
+        """Read a comma-separated, exact remote asset host allowlist."""
+        name = "HTML2PDF__REMOTE_ASSET_HOSTS"
+        values = [value.strip().casefold() for value in env.get(name, "").split(",") if value.strip()]
+        for value in values:
+            parsed = urlsplit("//" + value)
+            if parsed.hostname != value or parsed.port is not None or "/" in value:
+                raise ValueError(f"{name} must contain hostnames only")
+        return frozenset(values)
+
+    @classmethod
+    def _env_bool(cls, env: Mapping[str, str], name: str, default: bool) -> bool:
+        """Read a strict boolean environment variable."""
+        value = cls._env_str(env, name)
+        if not value:
+            return default
+        if value.casefold() == "true":
+            return True
+        if value.casefold() == "false":
+            return False
+        raise ValueError(f"{name} must be true or false")
 
     @classmethod
     def _env_int(cls, env: Mapping[str, str], name: str, default: int, *, minimum: int = 1) -> int:
@@ -250,7 +292,12 @@ def load_index(config: Config) -> bytes:
     return page.encode("utf-8")
 
 
-def render_document(source: str, asset_policy: AssetPolicy = AssetPolicy.EMBEDDED) -> bytes:
+def render_document(
+    source: str,
+    asset_policy: AssetPolicy = AssetPolicy.EMBEDDED,
+    remote_asset_hosts: frozenset[str] = frozenset(),
+    allow_private_remote_assets: bool = False,
+) -> bytes:
     """Render one HTML document using the configured asset-fetching policy."""
 
     class AssetFetcher(URLFetcher):
@@ -274,6 +321,15 @@ def render_document(source: str, asset_policy: AssetPolicy = AssetPolicy.EMBEDDE
                     f"by policy {asset_policy.value!r}"
                 )
 
+            if scheme in ("http", "https"):
+                try:
+                    validate_remote_asset_url(url, remote_asset_hosts, allow_private_remote_assets)
+                except AssetError:
+                    # WeasyPrint may continue after an asset-fetch failure; retain
+                    # this policy decision so the request still fails as a whole.
+                    self.rejected = True
+                    raise
+
             return super().fetch(url, headers)
 
     fetcher = AssetFetcher()
@@ -291,6 +347,28 @@ def render_document(source: str, asset_policy: AssetPolicy = AssetPolicy.EMBEDDE
         raise AssetError(f"Asset rejected by {asset_policy.value!r} policy")
 
     return result
+
+
+def validate_remote_asset_url(
+    value: str, allowed_hosts: frozenset[str], allow_private_addresses: bool,
+) -> None:
+    """Require an allowed remote hostname and reject unsafe resolved addresses."""
+    parsed = urlsplit(value)
+    hostname = parsed.hostname
+    if hostname is None or hostname.casefold() not in allowed_hosts:
+        raise AssetError("Remote asset host is not allowed")
+
+    if allow_private_addresses:
+        return
+
+    try:
+        addresses = socket.getaddrinfo(hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        raise AssetError("Remote asset host could not be resolved") from exc
+
+    for _, _, _, _, address in addresses:
+        if not ipaddress.ip_address(address[0]).is_global:
+            raise AssetError("Remote asset host resolved to a non-public address")
 
 
 def bearer_token(request: Request) -> str:
@@ -449,7 +527,15 @@ def render_response(
     started = time.perf_counter()
 
     try:
-        result = render_document(source, config.asset_policy)
+        if config.asset_policy is AssetPolicy.REMOTE:
+            result = render_document(
+                source,
+                config.asset_policy,
+                config.remote_asset_hosts,
+                config.allow_private_remote_assets,
+            )
+        else:
+            result = render_document(source, config.asset_policy)
     except AssetError:
         logger.warning(
             "render rejected duration_ms=%d html_bytes=%d reason=asset_policy",
@@ -458,7 +544,7 @@ def render_response(
         )
 
         if config.asset_policy is AssetPolicy.REMOTE:
-            message = b"Only data:, http:, and https: asset URLs are allowed\n"
+            message = b"Only allowlisted remote HTTP(S) asset hosts are allowed\n"
         else:
             message = (
                 b"Embed images, fonts, and other assets as data URLs; "
