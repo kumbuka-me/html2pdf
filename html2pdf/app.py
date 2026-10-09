@@ -81,7 +81,7 @@ class Config:
     listen_address: str = "0.0.0.0:8080"
     # asset_policy controls whether rendered documents may fetch remote assets.
     asset_policy: AssetPolicy = AssetPolicy.EMBEDDED
-    # remote_asset_hosts is the exact host allowlist used in remote mode.
+    # remote_asset_hosts is the exact host allowlist used in remote mode; "*" allows all hosts.
     remote_asset_hosts: frozenset[str] = frozenset()
     # allow_private_remote_assets permits approved hosts to resolve to non-public addresses.
     allow_private_remote_assets: bool = False
@@ -132,7 +132,7 @@ class Config:
 
     @classmethod
     def _env_remote_asset_hosts(cls, env: Mapping[str, str]) -> frozenset[str]:
-        """Read a comma-separated, exact remote asset host allowlist."""
+        """Read a comma-separated remote asset host allowlist or explicit wildcard."""
         name = "HTML2PDF__REMOTE_ASSET_HOSTS"
         values = [value.strip().casefold() for value in env.get(name, "").split(",") if value.strip()]
         for value in values:
@@ -355,7 +355,7 @@ def validate_remote_asset_url(
     """Require an allowed remote hostname and reject unsafe resolved addresses."""
     parsed = urlsplit(value)
     hostname = parsed.hostname
-    if hostname is None or hostname.casefold() not in allowed_hosts:
+    if hostname is None or "*" not in allowed_hosts and hostname.casefold() not in allowed_hosts:
         raise AssetError("Remote asset host is not allowed")
 
     if allow_private_addresses:

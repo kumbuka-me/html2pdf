@@ -78,7 +78,7 @@ Rejected by default:
 
 This default prevents submitted documents from using the renderer for SSRF, cloud-metadata access, local-file reads, or requests to private services.
 
-To allow remote assets, set `HTML2PDF__ASSET_POLICY=remote` and provide an exact comma-separated hostname allowlist in `HTML2PDF__REMOTE_ASSET_HOSTS`. HTTP redirects are not followed. Resolutions to non-public addresses are rejected by default; set `HTML2PDF__ALLOW_PRIVATE_REMOTE_ASSETS=true` only for explicitly approved internal asset services, and enforce matching Kubernetes egress policy.
+To allow remote assets, set `HTML2PDF__ASSET_POLICY=remote` and provide an exact comma-separated hostname allowlist in `HTML2PDF__REMOTE_ASSET_HOSTS`. Set it to `*` to allow every hostname. HTTP redirects are not followed. Resolutions to non-public addresses are rejected by default; set `HTML2PDF__ALLOW_PRIVATE_REMOTE_ASSETS=true` only for explicitly approved internal asset services, and enforce matching Kubernetes egress policy.
 
 ```sh
 docker run --rm \
@@ -121,18 +121,18 @@ For explicitly isolated development environments, set `HTML2PDF__ALLOW_UNAUTHENT
 
 The service is configured through environment variables.
 
-| Variable                                | Default        | Description                                                    |
-| --------------------------------------- | -------------- | -------------------------------------------------------------- |
-| `HTML2PDF__TOKEN`                       | required       | Shared secret for `/render`, sent using the Bearer scheme.     |
-| `HTML2PDF__ALLOW_UNAUTHENTICATED`       | `false`        | Explicit development-only opt-out for a missing token.         |
-| `HTML2PDF__LISTEN_ADDRESS`              | `0.0.0.0:8080` | Gunicorn bind address inside the container.                    |
-| `HTML2PDF__WORKERS`                     | `2`            | Number of Gunicorn workers.                                    |
-| `HTML2PDF__TIMEOUT`                     | `45`           | Gunicorn worker timeout in seconds.                            |
-| `HTML2PDF__ASSET_POLICY`                | `embedded`     | Asset mode: `embedded` or `remote`.                            |
-| `HTML2PDF__REMOTE_ASSET_HOSTS`          | empty          | Required exact hostname allowlist when asset mode is `remote`. |
-| `HTML2PDF__ALLOW_PRIVATE_REMOTE_ASSETS` | `false`        | Allow listed hosts to resolve to non-public addresses.         |
-| `HTML2PDF__MAX_HTML_BYTES`              | `33554432`     | Maximum HTML request size (32 MiB).                            |
-| `HTML2PDF__MAX_PDF_BYTES`               | `67108864`     | Maximum generated PDF size (64 MiB).                           |
+| Variable                                | Default        | Description                                                                               |
+| --------------------------------------- | -------------- | ----------------------------------------------------------------------------------------- |
+| `HTML2PDF__TOKEN`                       | required       | Shared secret for `/render`, sent using the Bearer scheme.                                |
+| `HTML2PDF__ALLOW_UNAUTHENTICATED`       | `false`        | Explicit development-only opt-out for a missing token.                                    |
+| `HTML2PDF__LISTEN_ADDRESS`              | `0.0.0.0:8080` | Gunicorn bind address inside the container.                                               |
+| `HTML2PDF__WORKERS`                     | `2`            | Number of Gunicorn workers.                                                               |
+| `HTML2PDF__TIMEOUT`                     | `45`           | Gunicorn worker timeout in seconds.                                                       |
+| `HTML2PDF__ASSET_POLICY`                | `embedded`     | Asset mode: `embedded` or `remote`.                                                       |
+| `HTML2PDF__REMOTE_ASSET_HOSTS`          | empty          | Required exact hostname allowlist when asset mode is `remote`; `*` allows every hostname. |
+| `HTML2PDF__ALLOW_PRIVATE_REMOTE_ASSETS` | `false`        | Allow listed hosts to resolve to non-public addresses.                                    |
+| `HTML2PDF__MAX_HTML_BYTES`              | `33554432`     | Maximum HTML request size (32 MiB).                                                       |
+| `HTML2PDF__MAX_PDF_BYTES`               | `67108864`     | Maximum generated PDF size (64 MiB).                                                      |
 
 Size limits are configured in bytes.
 

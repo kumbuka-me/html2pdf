@@ -245,6 +245,14 @@ class ServiceTests(unittest.TestCase):
 
             fetch.assert_not_called()
 
+    def test_remote_policy_wildcard_allows_any_public_host(self):
+        with patch.object(
+            app.socket,
+            "getaddrinfo",
+            return_value=[(0, 0, 0, "", ("93.184.216.34", 443))],
+        ):
+            app.validate_remote_asset_url("https://unlisted.example/image.svg", frozenset(("*",)), False)
+
     def test_data_url_assets_are_allowed(self):
         source = (
             '<img alt="pixel" '
@@ -501,6 +509,14 @@ class ConfigTests(unittest.TestCase):
             app.Config("secret", "v1", 3, 60, 100, 200, asset_policy=AssetPolicy.REMOTE,
                        remote_asset_hosts=frozenset(("assets.example.com",))),
         )
+
+    def test_remote_asset_host_wildcard_is_accepted(self):
+        config = app.Config.from_env({
+            "HTML2PDF__TOKEN": "secret",
+            "HTML2PDF__ASSET_POLICY": "remote",
+            "HTML2PDF__REMOTE_ASSET_HOSTS": "*",
+        })
+        self.assertEqual(config.remote_asset_hosts, frozenset(("*",)))
 
     def test_invalid_numeric_configuration_fails_startup(self):
         for name in ("WORKERS", "TIMEOUT", "MAX_HTML_BYTES", "MAX_PDF_BYTES"):
