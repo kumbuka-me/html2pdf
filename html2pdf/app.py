@@ -432,20 +432,34 @@ def method_not_allowed(start_response: StartResponse, allowed: str) -> Response:
 
 def read_html(request: Request, config: Config) -> tuple[str, int]:
     """Validate and read a UTF-8 HTML request body."""
-    if request.media_type != "text/html":
+    if request.media_type != "text/html" or request.charset not in (None, "utf-8", "utf8"):
         raise RequestError(
             HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
             b"Send text/html encoded as UTF-8\n",
         )
 
-    if request.charset not in (None, "utf-8", "utf8"):
+    length = html_content_length(request.content_length, config.max_html_bytes)
+    body = request.read(length)
+
+    if len(body) != length:
         raise RequestError(
-            HTTPStatus.UNSUPPORTED_MEDIA_TYPE,
-            b"Send text/html encoded as UTF-8\n",
+            HTTPStatus.BAD_REQUEST,
+            b"Incomplete request body\n",
         )
 
-    content_length = request.content_length
+    try:
+        source = body.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise RequestError(
+            HTTPStatus.BAD_REQUEST,
+            b"HTML must be UTF-8\n",
+        ) from exc
 
+    return source, length
+
+
+def html_content_length(content_length: str, limit: int) -> int:
+    """Validate the declared HTML byte count before reading the request stream."""
     if not content_length:
         raise RequestError(
             HTTPStatus.LENGTH_REQUIRED,
@@ -467,7 +481,7 @@ def read_html(request: Request, config: Config) -> tuple[str, int]:
         )
 
     # Reject absurdly large values before converting attacker-controlled input.
-    max_length = str(config.max_html_bytes)
+    max_length = str(limit)
     if len(normalized_length) > len(max_length):
         raise RequestError(
             HTTPStatus.CONTENT_TOO_LARGE,
@@ -476,29 +490,13 @@ def read_html(request: Request, config: Config) -> tuple[str, int]:
 
     length = int(normalized_length)
 
-    if length > config.max_html_bytes:
+    if length > limit:
         raise RequestError(
             HTTPStatus.CONTENT_TOO_LARGE,
             b"HTML exceeds configured size limit\n",
         )
 
-    body = request.read(length)
-
-    if len(body) != length:
-        raise RequestError(
-            HTTPStatus.BAD_REQUEST,
-            b"Incomplete request body\n",
-        )
-
-    try:
-        source = body.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise RequestError(
-            HTTPStatus.BAD_REQUEST,
-            b"HTML must be UTF-8\n",
-        ) from exc
-
-    return source, length
+    return length
 
 
 def render_response(
